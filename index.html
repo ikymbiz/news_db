@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>news-db - AI Specialist News Tracker</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Fuse.js -->
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.js"></script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom Styles */
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .accordion-content { transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out; }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 antialiased min-h-screen">
+  <div id="app" v-cloak>
+    <!-- Navigation -->
+    <nav class="bg-slate-800 text-white shadow-lg sticky top-0 z-40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+          <div class="flex items-center space-x-3">
+            <i class="fa-solid fa-database text-blue-400 text-xl"></i>
+            <span class="font-bold text-xl tracking-wider">news-db</span>
+          </div>
+          <div class="flex space-x-4">
+            <button @click="currentTab = 'home'" :class="{'bg-slate-900': currentTab === 'home', 'hover:bg-slate-700': currentTab !== 'home'}" class="px-3 py-2 rounded-md text-sm font-medium transition">
+              <i class="fa-solid fa-house mr-1"></i> Public View
+            </button>
+            <button @click="currentTab = 'admin'" :class="{'bg-slate-900': currentTab === 'admin', 'hover:bg-slate-700': currentTab !== 'admin'}" class="px-3 py-2 rounded-md text-sm font-medium transition">
+              <i class="fa-solid fa-gear mr-1"></i> Admin
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      
+      <!-- ================= PUBLIC VIEW ================= -->
+      <section v-show="currentTab === 'home'">
+        <div class="mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <h2 class="text-2xl font-bold text-gray-700">Latest News</h2>
+          <!-- Search -->
+          <div class="relative w-full sm:w-96">
+            <input type="text" v-model="searchQuery" placeholder="記事を検索..." class="w-full pl-10 pr-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm">
+            <i class="fa-solid fa-magnifying-glass absolute left-4 top-3 text-gray-400"></i>
+          </div>
+        </div>
+
+        <div v-if="filteredArticles.length === 0" class="text-center py-12 text-gray-500 bg-white rounded-lg shadow-sm border border-gray-200">
+          <i class="fa-regular fa-folder-open text-4xl mb-3"></i>
+          <p>表示する記事がありません。</p>
+        </div>
+
+        <!-- Article List -->
+        <div class="space-y-6">
+          <transition-group name="fade">
+            <article v-for="article in filteredArticles" :key="article.id" v-show="!article.isDeleted" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition">
+              <div class="p-6">
+                <div class="flex justify-between items-start mb-2">
+                  <div class="flex flex-wrap items-center gap-2 text-sm text-gray-500 mb-2">
+                    <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-semibold">{{ article.category }}</span>
+                    <span><i class="fa-regular fa-calendar mr-1"></i>{{ article.pubDate }}</span>
+                  </div>
+                  <div class="flex space-x-2">
+                    <button @click="toggleImportance(article)" :class="article.isImportant ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-300 hover:text-yellow-400'" title="重要フラグ切替" class="transition">
+                      <i class="fa-solid fa-star text-xl"></i>
+                    </button>
+                    <button @click="deleteArticle(article)" class="text-gray-400 hover:text-red-500 transition" title="記事を削除">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                    <button @click="downloadMarkdown(article)" class="text-gray-400 hover:text-gray-700 transition" title="Markdownでダウンロード">
+                      <i class="fa-solid fa-file-arrow-down"></i>
+                    </button>
+                  </div>
+                </div>
+                
+                <h3 class="text-xl font-bold text-gray-900 mb-3 leading-tight">
+                  <a :href="article.url" target="_blank" class="hover:text-blue-600 hover:underline"><i class="fa-solid fa-link text-sm mr-1 text-gray-400"></i>{{ article.title }}</a>
+                </h3>
+                
+                <p class="text-gray-700 mb-4 text-sm leading-relaxed bg-gray-50 p-3 rounded">{{ article.summary }}</p>
+
+                <!-- Accordion Toggle -->
+                <button @click="article.showDetails = !article.showDetails" class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center focus:outline-none">
+                  <span v-if="!article.showDetails"><i class="fa-solid fa-chevron-down mr-1"></i> 詳細な分析・考察を見る</span>
+                  <span v-else><i class="fa-solid fa-chevron-up mr-1"></i> 閉じる</span>
+                </button>
+
+                <!-- Accordion Content -->
+                <div v-show="article.showDetails" class="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h4 class="font-semibold text-gray-800 mb-2 border-l-4 border-indigo-500 pl-2">ディープリサーチ結果</h4>
+                    <div class="prose prose-sm text-gray-600 whitespace-pre-line">{{ article.deepResearch }}</div>
+                  </div>
+                  <div>
+                    <h4 class="font-semibold text-gray-800 mb-2 border-l-4 border-emerald-500 pl-2">分析・考察レポート</h4>
+                    <div class="prose prose-sm text-gray-600 whitespace-pre-line">{{ article.analysis }}</div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </transition-group>
+        </div>
+      </section>
+
+      <!-- ================= ADMIN VIEW ================= -->
+      <section v-show="currentTab === 'admin'" class="space-y-8">
+        
+        <!-- Header Actions -->
+        <div class="flex flex-wrap justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-200 gap-4">
+          <h2 class="text-2xl font-bold text-gray-700"><i class="fa-solid fa-screwdriver-wrench mr-2"></i>管理画面</h2>
+          <div class="flex space-x-3">
+            <button @click="exportData" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded text-sm font-medium transition shadow-sm">
+              <i class="fa-solid fa-download mr-1"></i> 全データ一括DL
+            </button>
+            <label class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm font-medium transition shadow-sm cursor-pointer">
+              <i class="fa-solid fa-upload mr-1"></i> ログ/データインポート
+              <input type="file" @change="importData" class="hidden" accept=".json">
+            </label>
+          </div>
+        </div>
+
+        <!-- System Status & API Key -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <h3 class="text-lg font-bold mb-4 border-b pb-2">システム設定</h3>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Gemini API Key (gemini-2.5-flash利用)</label>
+            <input type="password" v-model="data.apiKey" placeholder="AIzaSy..." class="w-full max-w-lg border border-gray-300 rounded px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+            <p class="text-xs text-gray-500 mt-1">※キーはブラウザのLocalStorageにのみ保存されます。</p>
+          </div>
+        </div>
+
+        <!-- RSS / Fetch Action -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div class="flex justify-between items-center border-b pb-2 mb-4">
+            <h3 class="text-lg font-bold">RSSフィード管理</h3>
+            <button @click="fetchRssFeeds" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold transition shadow-md flex items-center">
+              <i class="fa-solid fa-rotate mr-2"></i> RSSフィード取得＆処理開始
+            </button>
+          </div>
+          
+          <div class="overflow-x-auto mb-4">
+            <table class="min-w-full text-sm text-left text-gray-500 border">
+              <thead class="text-xs text-gray-700 uppercase bg-gray-50 border-b">
+                <tr>
+                  <th class="px-4 py-3">情報源名</th>
+                  <th class="px-4 py-3">URL</th>
+                  <th class="px-4 py-3">タグ</th>
+                  <th class="px-4 py-3 w-16">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(feed, index) in data.rssFeeds" :key="index" class="bg-white border-b">
+                  <td class="px-4 py-2 font-medium text-gray-900"><input v-model="feed.name" class="border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none w-full bg-transparent"></td>
+                  <td class="px-4 py-2"><input v-model="feed.url" class="border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none w-full bg-transparent"></td>
+                  <td class="px-4 py-2"><input v-model="feed.tags" placeholder="例: テクノロジー, AI" class="border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none w-full bg-transparent"></td>
+                  <td class="px-4 py-2 text-center">
+                    <button @click="removeRss(index)" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-xmark"></i></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <form @submit.prevent="addRss" class="flex flex-wrap gap-2 items-end bg-gray-50 p-3 rounded border border-gray-100">
+            <div class="flex-1 min-w-[150px]">
+              <label class="block text-xs text-gray-500 mb-1">情報源名</label>
+              <input v-model="newRss.name" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" placeholder="TechCrunch">
+            </div>
+            <div class="flex-2 min-w-[200px]">
+              <label class="block text-xs text-gray-500 mb-1">RSS URL</label>
+              <input v-model="newRss.url" type="url" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" placeholder="https://...">
+            </div>
+            <div class="flex-1 min-w-[150px]">
+              <label class="block text-xs text-gray-500 mb-1">タグ</label>
+              <input v-model="newRss.tags" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" placeholder="AI, Startup">
+            </div>
+            <button type="submit" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-1.5 rounded text-sm font-medium">追加</button>
+          </form>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <!-- Categoris -->
+          <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 class="text-lg font-bold mb-4 border-b pb-2">カテゴリ定義</h3>
+            <div class="flex flex-wrap gap-2 mb-4">
+              <span v-for="(cat, index) in data.categories" :key="index" class="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm font-medium flex items-center">
+                {{ cat }}
+                <button @click="removeCategory(index)" class="ml-2 text-indigo-400 hover:text-indigo-600"><i class="fa-solid fa-xmark"></i></button>
+              </span>
+            </div>
+            <form @submit.prevent="addCategory" class="flex gap-2">
+              <input v-model="newCategory" required class="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm" placeholder="新しいカテゴリ名">
+              <button type="submit" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-1.5 rounded text-sm font-medium">追加</button>
+            </form>
+          </div>
+
+          <!-- Extraction Rules -->
+          <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 class="text-lg font-bold mb-4 border-b pb-2">抽出条件セット</h3>
+            <div class="space-y-3 mb-4">
+              <div v-for="(rule, index) in data.extractionRules" :key="rule.id" class="bg-gray-50 p-3 rounded border border-gray-200 relative group">
+                <button @click="removeExtractionRule(index)" class="absolute top-2 right-2 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                <input v-model="rule.name" class="font-bold text-gray-700 bg-transparent border-none outline-none w-full mb-1" placeholder="セット名">
+                <textarea v-model="rule.conditions" class="w-full text-sm bg-white border border-gray-200 rounded p-2 text-gray-600 outline-none focus:border-blue-400" rows="2" placeholder="条件: キーワードや正規表現など"></textarea>
+              </div>
+            </div>
+            <form @submit.prevent="addExtractionRule" class="bg-gray-50 p-3 rounded border border-gray-100 border-dashed">
+              <input v-model="newRule.name" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm mb-2" placeholder="新規セット名 (例: AI技術)">
+              <textarea v-model="newRule.conditions" required class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm mb-2" rows="2" placeholder="条件の記述"></textarea>
+              <button type="submit" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-1.5 rounded text-sm font-medium w-full">条件セットを追加</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Prompts Management -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <h3 class="text-lg font-bold mb-4 border-b pb-2">Gemini プロンプト管理</h3>
+          
+          <div class="space-y-6">
+            <!-- Extraction Prompts (Dynamic) -->
+            <div>
+              <h4 class="font-semibold text-indigo-700 mb-2 border-l-4 border-indigo-500 pl-2">抽出条件判別プロンプト (自動生成・編集可)</h4>
+              <p class="text-xs text-gray-500 mb-3">※各抽出条件セットに対して、記事を抽出するか否かを「true」または「false」で答えるように指示してください。</p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div v-for="rule in data.extractionRules" :key="rule.id" class="border border-gray-200 rounded p-3 bg-indigo-50/30">
+                  <label class="block text-sm font-bold text-gray-700 mb-1">{{ rule.name }} 用判定</label>
+                  <textarea v-model="data.prompts.extraction[rule.id]" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500" rows="4"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <hr class="border-gray-200">
+
+            <!-- Fixed Prompts -->
+            <div>
+              <h4 class="font-semibold text-blue-700 mb-2 border-l-4 border-blue-500 pl-2">固定プロンプト</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-bold text-gray-700 mb-1">カテゴリ分類</label>
+                  <p class="text-[10px] text-gray-500 mb-1">{categories} は定義されたカテゴリ名に置換されます</p>
+                  <textarea v-model="data.prompts.fixed.category" class="w-full border border-gray-300 rounded px-3 py-2 text-sm" rows="3"></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-bold text-gray-700 mb-1">重要フラグ初期設定</label>
+                  <textarea v-model="data.prompts.fixed.importance" class="w-full border border-gray-300 rounded px-3 py-2 text-sm" rows="3"></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-bold text-gray-700 mb-1">要約生成</label>
+                  <textarea v-model="data.prompts.fixed.summary" class="w-full border border-gray-300 rounded px-3 py-2 text-sm" rows="3"></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-bold text-gray-700 mb-1">ディープリサーチ</label>
+                  <textarea v-model="data.prompts.fixed.deepResearch" class="w-full border border-gray-300 rounded px-3 py-2 text-sm" rows="3"></textarea>
+                </div>
+                <div class="md:col-span-2">
+                  <label class="block text-sm font-bold text-gray-700 mb-1">分析・考察</label>
+                  <textarea v-model="data.prompts.fixed.analysis" class="w-full border border-gray-300 rounded px-3 py-2 text-sm" rows="3"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <hr class="border-gray-200">
+
+            <!-- Custom Prompts -->
+            <div>
+              <h4 class="font-semibold text-emerald-700 mb-2 border-l-4 border-emerald-500 pl-2">カスタムプロンプト</h4>
+              <p class="text-xs text-gray-500 mb-3">ユーザー定義の自由なプロンプト。将来的な拡張用です。</p>
+              <div class="space-y-3 mb-4">
+                <div v-for="(cp, index) in data.prompts.custom" :key="cp.id" class="flex gap-2 items-start border border-gray-200 p-2 rounded bg-emerald-50/30">
+                  <input v-model="cp.name" class="w-1/4 border border-gray-300 rounded px-2 py-1.5 text-sm" placeholder="プロンプト名">
+                  <textarea v-model="cp.content" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" rows="2" placeholder="プロンプト内容"></textarea>
+                  <button @click="removeCustomPrompt(index)" class="text-gray-400 hover:text-red-500 mt-1"><i class="fa-solid fa-trash"></i></button>
+                </div>
+              </div>
+              <button @click="addCustomPrompt" class="text-sm text-emerald-600 hover:text-emerald-800 font-medium"><i class="fa-solid fa-plus mr-1"></i>カスタムプロンプトを追加</button>
+            </div>
+            
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Processing Overlay -->
+    <div v-if="isProcessing" class="fixed inset-0 bg-slate-900 bg-opacity-70 flex items-center justify-center z-50">
+      <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full text-center">
+        <h3 class="text-xl font-bold text-gray-800 mb-4">処理を実行中...</h3>
+        <div class="animate-spin h-10 w-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-sm text-gray-600 whitespace-pre-line leading-relaxed">{{ processStatus }}</p>
+        <div class="w-full bg-gray-200 rounded-full h-2 mt-4">
+          <div class="bg-blue-600 h-2 rounded-full transition-all duration-300" :style="{ width: progressPercent + '%' }"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
+
+    const LOCAL_STORAGE_KEY = 'news-db-data';
+
+    const defaultData = {
+      apiKey: "",
+      rssFeeds: [
+        { name: "TechCrunch Japan", url: "https://techcrunch.com/feed/", tags: "テクノロジー, AI" },
+        { name: "ITmedia AI+", url: "https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml", tags: "AI" }
+      ],
+      categories: ["政治", "経済", "テクノロジー", "社会", "AI研究"],
+      extractionRules: [
+        { id: 'rule_' + Date.now(), name: "AI関連ニュース", conditions: "キーワード: AI, 人工知能, 機械学習, LLM, 生成AI" }
+      ],
+      prompts: {
+        fixed: {
+          category: "以下の記事のタイトルと要約を読み、定義されたカテゴリの中から最も適切なものに分類してください。出力はカテゴリ名のみにしてください。\nカテゴリ: {categories}\n\nタイトル: {title}\n本文: {content}",
+          importance: "あなたはAIの専門家です。以下の記事はAI専門家にとって重要ですか？ 'true' または 'false' の文字列のみで答えてください。\n\nタイトル: {title}\n本文: {content}",
+          summary: "以下の記事の内容を専門家向けに3行で要約してください。\n\nタイトル: {title}\n本文: {content}",
+          deepResearch: "以下の記事の主題について、「背景情報」「一次情報」「関連ニュース」「関連ガイドライン」を深掘り調査して記述してください。学術論文、専門家のブログ、研究機関の発表を優先的に参照した体裁で出力してください。\n\nタイトル: {title}\n本文: {content}",
+          analysis: "以下の「深掘り調査結果」と「記事内容」に基づき、AI専門家の視点で400文字程度のレポート形式の分析・考察を生成してください。\n\n記事タイトル: {title}\n調査結果: {research}"
+        },
+        extraction: {},
+        custom: [
+          { id: 'c1', name: "技術スタック抽出", content: "この記事で言及されている技術スタックやツールを箇条書きで抽出してください。" }
+        ]
+      },
+      articles: [
+        {
+          id: "dummy_1",
+          title: "Googleが次世代Geminiモデルを発表 - マルチモーダル性能が飛躍",
+          url: "https://example.com/dummy",
+          pubDate: "2023/10/24",
+          summary: "Googleは次世代のAIモデルであるGeminiを発表した。推論能力が飛躍的に向上し、様々な業界での応用が期待される。専門家からの評価も高い。",
+          content: "ダミーテキスト...",
+          category: "AI研究",
+          isImportant: true,
+          isDeleted: false,
+          showDetails: false,
+          deepResearch: "【背景情報】\n大規模言語モデルの競争が激化する中、マルチモーダル対応が次世代の標準となっている。\n\n【一次情報】\nGoogle公式ブログ、および付随するテクニカルレポート原典。\n\n【関連ニュース】\nOpenAIの動向と比較する報道が多数。\n\n【関連ガイドライン】\n各国のAI安全性評価ガイドラインに準拠しているかが今後の焦点。",
+          analysis: "この発表はAI業界に大きなパラダイムシフトをもたらす可能性がある。特にマルチモーダル処理のネイティブ統合は、単なるテキスト処理を超えた実世界の物理的タスクへのAI適用を加速させる。専門家としては、公開されたベンチマークの再現性検証と、エッジデバイスでの推論最適化の度合いに注目すべきである。"
+        }
+      ]
+    };
+
+    // 初期化時に extraction プロンプトを設定
+    defaultData.prompts.extraction[defaultData.extractionRules[0].id] = "以下の記事が「AI, 人工知能, 機械学習, LLM, 生成AI」に関する内容を少しでも含んでいるか判定し、合致する場合は 'true'、しない場合は 'false' の文字列のみを出力してください。\n\nタイトル: {title}\n本文: {content}";
+
+    createApp({
+      setup() {
+        const currentTab = ref('home');
+        const searchQuery = ref('');
+        const data = reactive(JSON.parse(JSON.stringify(defaultData)));
+        
+        const isProcessing = ref(false);
+        const processStatus = ref('');
+        const progressPercent = ref(0);
+
+        // UI Forms
+        const newRss = reactive({ name: '', url: '', tags: '' });
+        const newCategory = ref('');
+        const newRule = reactive({ name: '', conditions: '' });
+
+        // Load data on mount
+        onMounted(() => {
+          const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              // Merge data to keep structure intact if updated
+              Object.assign(data, parsed);
+              
+              // Ensure extraction prompts exist for all rules
+              data.extractionRules.forEach(rule => {
+                if(!data.prompts.extraction[rule.id]) {
+                  data.prompts.extraction[rule.id] = `この記事が抽出条件（${rule.conditions}）に合致するか判定し、'true' か 'false' で答えてください。\n\nタイトル: {title}\n本文: {content}`;
+                }
+              });
+            } catch (e) { console.error("Data load error", e); }
+          }
+        });
+
+        // Save data on change
+        watch(data, (newVal) => {
+          // 不要なプロパティ（showDetailsなどUI用）を除外して保存することも可能だが、簡便のためそのまま保存
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newVal));
+        }, { deep: true });
+
+        // Search utilizing Fuse.js
+        const fuse = computed(() => {
+          return new Fuse(data.articles.filter(a => !a.isDeleted), {
+            keys: ['title', 'summary', 'category', 'pubDate', 'deepResearch', 'analysis'],
+            threshold: 0.3
+          });
+        });
+
+        const filteredArticles = computed(() => {
+          const activeArticles = data.articles.filter(a => !a.isDeleted);
+          if (!searchQuery.value) return activeArticles.sort((a,b) => new Date(b.pubDate) - new Date(a.pubDate));
+          const results = fuse.value.search(searchQuery.value);
+          return results.map(r => r.item);
+        });
+
+        // --- Admin Actions ---
+
+        const addRss = () => {
+          data.rssFeeds.push({ ...newRss });
+          newRss.name = ''; newRss.url = ''; newRss.tags = '';
+        };
+        const removeRss = (idx) => data.rssFeeds.splice(idx, 1);
+
+        const addCategory = () => {
+          if(newCategory.value && !data.categories.includes(newCategory.value)){
+            data.categories.push(newCategory.value);
+          }
+          newCategory.value = '';
+        };
+        const removeCategory = (idx) => data.categories.splice(idx, 1);
+
+        const addExtractionRule = () => {
+          if(!newRule.name) return;
+          const id = 'rule_' + Date.now();
+          data.extractionRules.push({ id, name: newRule.name, conditions: newRule.conditions });
+          data.prompts.extraction[id] = `以下の記事が抽出条件（${newRule.conditions}）に合致するか判定し、合致する場合は 'true'、しない場合は 'false' の文字列のみを出力してください。\n\nタイトル: {title}\n本文: {content}`;
+          newRule.name = ''; newRule.conditions = '';
+        };
+        const removeExtractionRule = (idx) => {
+          const ruleId = data.extractionRules[idx].id;
+          data.extractionRules.splice(idx, 1);
+          delete data.prompts.extraction[ruleId];
+        };
+
+        const addCustomPrompt = () => {
+          data.prompts.custom.push({ id: 'c' + Date.now(), name: '新規プロンプト', content: '' });
+        };
+        const removeCustomPrompt = (idx) => data.prompts.custom.splice(idx, 1);
+
+        // --- Data Export / Import ---
+
+        const downloadJsonFile = (jsonData, filename) => {
+          const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        const exportData = () => {
+          const exportObj = JSON.parse(JSON.stringify(data));
+          // APIキーを含めるか選択させる等あるが、今回は自己利用前提でそのまま出力
+          downloadJsonFile(exportObj, `news-db-export_${new Date().toISOString().slice(0,10)}.json`);
+        };
+
+        const importData = (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const imported = JSON.parse(e.target.result);
+              
+              // 変更ログか全体データかの簡易判定
+              if (imported.action === 'updateImportance' || imported.action === 'deleteArticle') {
+                applyChangelog(imported);
+              } else if (Array.isArray(imported) && imported[0]?.action) {
+                // 配列形式の変更ログ
+                imported.forEach(applyChangelog);
+              } else if (imported.articles && imported.categories) {
+                // 全体データ
+                if(confirm("全体データを上書きしますか？現在のデータは失われます。")) {
+                  Object.assign(data, imported);
+                  alert("インポートが完了しました。");
+                }
+              } else {
+                alert("認識できないJSONフォーマットです。");
+              }
+            } catch (err) {
+              alert("JSONの読み込みに失敗しました。");
+              console.error(err);
+            }
+          };
+          reader.readAsText(file);
+          event.target.value = ''; // reset
+        };
+
+        const applyChangelog = (log) => {
+          const target = data.articles.find(a => a.id === log.articleId);
+          if(target) {
+            if(log.action === 'updateImportance') target.isImportant = log.newValue;
+            if(log.action === 'deleteArticle') target.isDeleted = true;
+          }
+        };
+
+        // --- Public View Actions ---
+
+        const toggleImportance = (article) => {
+          article.isImportant = !article.isImportant;
+          const log = {
+            action: 'updateImportance',
+            articleId: article.id,
+            newValue: article.isImportant,
+            timestamp: new Date().toISOString()
+          };
+          downloadJsonFile(log, `changelog_imp_${article.id}.json`);
+        };
+
+        const deleteArticle = (article) => {
+          if(!confirm("この記事を削除（非表示）にしますか？\nダウンロードされる変更ログをインポートすることで永続化されます。")) return;
+          article.isDeleted = true;
+          const log = {
+            action: 'deleteArticle',
+            articleId: article.id,
+            timestamp: new Date().toISOString()
+          };
+          downloadJsonFile(log, `changelog_del_${article.id}.json`);
+        };
+
+        const downloadMarkdown = (article) => {
+          const md = `# ${article.title}
+公開日: ${article.pubDate}
+URL: ${article.url}
+カテゴリ: ${article.category}
+
+## 要約
+${article.summary}
+
+## ディープリサーチ結果
+${article.deepResearch}
+
+## 分析・考察レポート
+${article.analysis}
+`;
+          const blob = new Blob([md], { type: 'text/markdown' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `article_${article.id}.md`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        // --- Gemini API & RSS Fetching ---
+
+        const callGemini = async (promptText) => {
+          if (!data.apiKey) throw new Error("API Key is missing");
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${data.apiKey}`;
+          
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: promptText }] }],
+              generationConfig: { temperature: 0.2 } // 安定した出力のため低め
+            })
+          });
+
+          if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || "Gemini API Error");
+          }
+
+          const resData = await response.json();
+          return resData.candidates[0].content.parts[0].text.trim();
+        };
+
+        const parsePrompt = (template, context) => {
+          let parsed = template;
+          for (const key in context) {
+            parsed = parsed.replace(new RegExp(`{${key}}`, 'g'), context[key] || '');
+          }
+          return parsed;
+        };
+
+        const fetchRssFeeds = async () => {
+          if (!data.apiKey) {
+            alert("システム設定で Gemini API Key を設定してください。");
+            return;
+          }
+          if (data.rssFeeds.length === 0) {
+            alert("RSSフィードが登録されていません。");
+            return;
+          }
+
+          isProcessing.value = true;
+          processStatus.value = "RSSフィードを取得中...";
+          progressPercent.value = 5;
+
+          const newArticlesRaw = [];
+
+          // 1. Fetch RSS via rss2json proxy (Public API)
+          for (let i = 0; i < data.rssFeeds.length; i++) {
+            const feed = data.rssFeeds[i];
+            processStatus.value = `RSS取得中: ${feed.name} (${i+1}/${data.rssFeeds.length})`;
+            try {
+              const res = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}&api_key=`); // api_keyなしで制限あり利用
+              if(res.ok) {
+                const json = await res.json();
+                if(json.items) {
+                  json.items.forEach(item => {
+                    // 重複チェック (URL)
+                    if(!data.articles.find(a => a.url === item.link)) {
+                      newArticlesRaw.push({
+                        id: 'art_' + Date.now() + Math.random().toString(36).substr(2, 5),
+                        title: item.title,
+                        url: item.link,
+                        pubDate: item.pubDate.split(' ')[0], // YYYY-MM-DD
+                        content: item.description || item.content || item.title // 生テキスト代わり
+                      });
+                    }
+                  });
+                }
+              }
+            } catch (e) {
+              console.warn(`Failed to fetch RSS: ${feed.url}`, e);
+            }
+          }
+
+          if (newArticlesRaw.length === 0) {
+            processStatus.value = "新しい記事は見つかりませんでした。";
+            setTimeout(() => isProcessing.value = false, 1500);
+            return;
+          }
+
+          // 2. Process each article with Gemini
+          const totalSteps = newArticlesRaw.length;
+          let processedCount = 0;
+
+          for (const rawArticle of newArticlesRaw) {
+            processedCount++;
+            progressPercent.value = 10 + Math.floor((processedCount / totalSteps) * 90);
+            
+            // Text preprocessing (strip html tags roughly to save token limit)
+            const cleanContent = rawArticle.content.replace(/<[^>]*>?/gm, '').substring(0, 1500); 
+
+            try {
+              processStatus.value = `記事判別中 (${processedCount}/${totalSteps}): \n${rawArticle.title.substring(0,20)}...`;
+              
+              // A. 抽出条件判別
+              let isMatch = false;
+              for (const rule of data.extractionRules) {
+                const promptTemplate = data.prompts.extraction[rule.id];
+                if(!promptTemplate) continue;
+                const prompt = parsePrompt(promptTemplate, { title: rawArticle.title, content: cleanContent });
+                const result = await callGemini(prompt);
+                if (result.toLowerCase().includes('true')) {
+                  isMatch = true;
+                  break; // 1つでも合致すればOK
+                }
+              }
+
+              if (!isMatch) continue; // 条件に合致しない記事はスキップ
+
+              // 合致した場合、詳細処理を実行
+              processStatus.value = `AI分析中 (${processedCount}/${totalSteps}): \n${rawArticle.title.substring(0,20)}...`;
+
+              // B. カテゴリ分類
+              const catPrompt = parsePrompt(data.prompts.fixed.category, { categories: data.categories.join(", "), title: rawArticle.title, content: cleanContent });
+              let categoryResult = await callGemini(catPrompt);
+              // 正規化: 出力から定義済みカテゴリを探す
+              let assignedCat = "その他";
+              for(const cat of data.categories) {
+                if(categoryResult.includes(cat)) { assignedCat = cat; break; }
+              }
+
+              // C. 重要フラグ
+              const impPrompt = parsePrompt(data.prompts.fixed.importance, { title: rawArticle.title, content: cleanContent });
+              const impResult = await callGemini(impPrompt);
+              const isImportant = impResult.toLowerCase().includes('true');
+
+              // D. 要約
+              const sumPrompt = parsePrompt(data.prompts.fixed.summary, { title: rawArticle.title, content: cleanContent });
+              const summary = await callGemini(sumPrompt);
+
+              // E. ディープリサーチ
+              const researchPrompt = parsePrompt(data.prompts.fixed.deepResearch, { title: rawArticle.title, content: cleanContent });
+              const deepResearch = await callGemini(researchPrompt);
+
+              // F. 分析・考察
+              const analysisPrompt = parsePrompt(data.prompts.fixed.analysis, { title: rawArticle.title, research: deepResearch });
+              const analysis = await callGemini(analysisPrompt);
+
+              // 保存
+              data.articles.unshift({
+                id: rawArticle.id,
+                title: rawArticle.title,
+                url: rawArticle.url,
+                pubDate: rawArticle.pubDate,
+                category: assignedCat,
+                summary: summary,
+                content: cleanContent,
+                isImportant: isImportant,
+                isDeleted: false,
+                showDetails: false,
+                deepResearch: deepResearch,
+                analysis: analysis
+              });
+
+            } catch (err) {
+              console.error("Gemini API Error on article:", rawArticle.title, err);
+              // エラーが起きても次の記事へ進む
+            }
+          }
+
+          processStatus.value = "処理が完了しました！";
+          progressPercent.value = 100;
+          setTimeout(() => { isProcessing.value = false; }, 1500);
+        };
+
+        return {
+          currentTab, searchQuery, data, filteredArticles,
+          newRss, addRss, removeRss,
+          newCategory, addCategory, removeCategory,
+          newRule, addExtractionRule, removeExtractionRule,
+          addCustomPrompt, removeCustomPrompt,
+          exportData, importData,
+          toggleImportance, deleteArticle, downloadMarkdown,
+          fetchRssFeeds, isProcessing, processStatus, progressPercent
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
